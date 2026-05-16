@@ -386,14 +386,22 @@ class TerminalTab(QWidget):
             return 120, 30
 
     def _on_output(self, text: str) -> None:
-        # Render: TerminalView (pyte) hoặc AnsiRenderer (fallback)
-        if self._uses_tui:
-            self.output.feed(text)
-        else:
-            self._renderer.feed(text)
-        # Combined log + password detection nhận bản plain
-        clean = strip_ansi(text).replace("\r\n", "\n").replace("\r", "\n")
+        # Cập nhật buffer cho password detection (cả 2 mode đều cần)
+        clean = strip_ansi(text).replace("\r\n", "\n")
         self._recent_output = (self._recent_output + clean)[-512:]
+
+        if self._uses_tui:
+            # TUI mode (pyte): render vào TerminalView. KHÔNG emit output ra
+            # combined log — vì TUI app (vim/htop/Claude Code/...) update màn
+            # hình bằng cursor movement + erase + redraw text, sau khi strip
+            # ANSI sẽ thành rất nhiều fragment khó hiểu ở log. Scrollback của
+            # TerminalView đã là source of truth. Combined log chỉ giữ system
+            # events (mở/đóng tab, đổi bố cục).
+            self.output.feed(text)
+            return
+
+        # Fallback mode (QPlainTextEdit + AnsiRenderer): log như cũ
+        self._renderer.feed(text)
         self.output_received.emit(self.label, clean)
 
     def _on_view_key_pressed(self, data: bytes) -> None:

@@ -1279,15 +1279,17 @@ class MainWindow(QMainWindow):
     # ---------- Combined log ----------
     def _on_terminal_output(self, label: str, text: str) -> None:
         # Gom chunk vào buffer per-label. Chỉ log những line ĐÃ KẾT THÚC (có
-        # \n). Phần dở dang (cuối buffer) giữ lại đến chunk sau. Cách này tránh
-        # log spam khi TUI mode echo từng ký tự gõ phím.
+        # \n). Trong từng line, \r ĐÈ DÒNG (như spinner) — chỉ giữ phần sau
+        # \r cuối cùng. Tránh log spam khi TUI mode echo từng ký tự / spinner.
         ts = datetime.now().strftime("%H:%M:%S")
         buf = self._log_buffers.get(label, "") + text
         parts = buf.split("\n")
-        # parts[-1] là phần dở dang (sau \n cuối cùng) — giữ lại
-        self._log_buffers[label] = parts[-1]
+        # parts[-1] là phần dở dang (sau \n cuối cùng); chỉ giữ text sau \r cuối
+        # — nếu user/shell sau đó in nữa sẽ tiếp tục ghép vào dòng đang xây.
+        self._log_buffers[label] = parts[-1].rsplit("\r", 1)[-1]
         for line in parts[:-1]:
-            line = line.rstrip("\r")
+            # \r trong line = overwrite. Chỉ log content cuối cùng (sau \r cuối).
+            line = line.rsplit("\r", 1)[-1].rstrip()
             if line:
                 self._append_log_entry(ts, label, line)
 

@@ -15,7 +15,7 @@ Phát signal:
 
 from __future__ import annotations
 
-from PyQt5.QtCore import Qt, pyqtSignal, QRect, QSize, QTimer
+from PyQt5.QtCore import Qt, pyqtSignal, QRect, QSize, QTimer, QEvent
 from PyQt5.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
 from PyQt5.QtWidgets import QAbstractScrollArea, QWidget
 
@@ -213,6 +213,29 @@ class TerminalView(QAbstractScrollArea):
         self._char_width = max(1, self._fm.horizontalAdvance("M"))
         self._char_height = max(1, self._fm.height())
         self._recompute_size()
+        self.viewport().update()
+
+    # ---------- Zoom (font size) ----------
+    _ZOOM_MIN = 6
+    _ZOOM_MAX = 72
+    _DEFAULT_POINT_SIZE = 10
+
+    def _set_font_size(self, pt: int) -> None:
+        pt = max(self._ZOOM_MIN, min(self._ZOOM_MAX, int(pt)))
+        if pt == self._font.pointSize():
+            return
+        f = QFont(self._font)
+        f.setPointSize(pt)
+        self.set_font(f)
+
+    def zoom_in(self) -> None:
+        self._set_font_size(self._font.pointSize() + 1)
+
+    def zoom_out(self) -> None:
+        self._set_font_size(self._font.pointSize() - 1)
+
+    def zoom_reset(self) -> None:
+        self._set_font_size(self._DEFAULT_POINT_SIZE)
 
     # ---------- size / scroll ----------
     def _recompute_size(self) -> None:
@@ -241,6 +264,29 @@ class TerminalView(QAbstractScrollArea):
             24 * self._char_height + 4,
         )
 
+    # ---------- event() override — chặn shortcut + tab focus navigation ----------
+    def event(self, e):
+        """
+        Khi TerminalView có focus, MỌI phím phải đi xuống TTY:
+        - ShortcutOverride: accept để vô hiệu QShortcut của MainWindow (Ctrl+T,
+          Ctrl+L, Ctrl+R, Ctrl+W, Ctrl+I, ...) — user clicked vào terminal nên
+          muốn các phím đó là control codes / TUI shortcuts của shell/CLI.
+        - Tab / Backtab (Shift+Tab): Qt mặc định dùng cho focus navigation
+          giữa widgets. Phải catch ở event() trước khi Qt route, để chuyển
+          xuống keyPressEvent → PTY (vd Claude Code dùng Shift+Tab).
+
+        Muốn dùng shortcut của app (Ctrl+T mở tab, v.v.) → click ra ngoài
+        TerminalView (vd ô nhập chung, sidebar Favorites) để chuyển focus.
+        """
+        et = e.type()
+        if et == QEvent.ShortcutOverride:
+            e.accept()
+            return True
+        if et == QEvent.KeyPress and e.key() in (Qt.Key_Tab, Qt.Key_Backtab):
+            self.keyPressEvent(e)
+            return True
+        return super().event(e)
+
     # ---------- input ----------
     def _scroll_to_live(self) -> None:
         """Đưa view về bottom (live screen) — gọi mỗi khi user gõ phím để con trỏ luôn visible."""
@@ -257,6 +303,24 @@ class TerminalView(QAbstractScrollArea):
         key = e.key()
         mods = e.modifiers()
         text = e.text()
+
+        # Zoom shortcuts (xử lý local, KHÔNG forward xuống PTY):
+        # Ctrl + + / Ctrl + = : zoom in
+        # Ctrl + -          : zoom out
+        # Ctrl + 0          : reset zoom
+        if mods & Qt.ControlModifier and not (mods & Qt.AltModifier):
+            if key in (Qt.Key_Plus, Qt.Key_Equal):
+                self.zoom_in()
+                e.accept()
+                return
+            if key == Qt.Key_Minus:
+                self.zoom_out()
+                e.accept()
+                return
+            if key == Qt.Key_0:
+                self.zoom_reset()
+                e.accept()
+                return
 
         # Đặc biệt: Ctrl+letter → control codes (Ctrl+C = \x03, Ctrl+D = \x04, ...)
         if mods & Qt.ControlModifier and not (mods & Qt.AltModifier):
@@ -430,6 +494,18 @@ class TerminalView(QAbstractScrollArea):
     def mousePressEvent(self, e):
         self.setFocus(Qt.MouseFocusReason)
         super().mousePressEvent(e)
+
+    def wheelEvent(self, e):
+        """Ctrl+wheel → zoom font (giữ Ctrl, lăn lên = to, lăn xuống = nhỏ)."""
+        if e.modifiers() & Qt.ControlModifier:
+            delta = e.angleDelta().y()
+            if delta > 0:
+                self.zoom_in()
+            elif delta < 0:
+                self.zoom_out()
+            e.accept()
+            return
+        super().wheelEvent(e)
 
 
 PYTE_AVAILABLE = pyte is not None
