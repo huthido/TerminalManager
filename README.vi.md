@@ -4,6 +4,8 @@
 
 Ứng dụng **cross-platform** (Windows / macOS / Linux) quản lý nhiều phiên shell trong một cửa sổ duy nhất, viết bằng **Python + PyQt5**.
 
+**Repository:** https://github.com/huthido/TerminalManager
+
 | Platform | Shells hỗ trợ | TTY backend |
 |----------|----------------|-------------|
 | Windows  | CMD, PowerShell, WSL, Git Bash | `pywinpty` (ConPTY) |
@@ -28,11 +30,11 @@
 - Sidebar **Lệnh yêu thích**: lưu / sửa / xoá / chạy, có ô **tìm kiếm** và lọc theo shell. **🔍 Quét** tự phát hiện CLI tools đã cài (git, python, docker, ...) và thêm hàng loạt làm favorites.
 - **Click favorite** → command tự load vào ô nhập để edit; **double-click** → chạy ngay.
 - **Chạy script** (`Ctrl+R`): chọn file `.bat` / `.cmd` / `.ps1` → tự chọn shell phù hợp, hỏi chạy ở tab hiện tại hay mở tab mới. Với `.ps1` tự bật `Set-ExecutionPolicy -Scope Process Bypass`.
-- **Mở thư mục** (`Ctrl+O`): chọn folder từ dialog → tự `cd` vào terminal active (build command đúng theo shell: `cd /D` cho cmd, `Set-Location` cho PowerShell, `cd '/mnt/c/…'` cho WSL, v.v.)
+- **Mở thư mục** (`Ctrl+O`): chọn folder từ dialog → tự `cd` vào terminal active (build command đúng theo shell).
 - **Active terminal**: chỉ 1 terminal active tại 1 thời điểm; tất cả lệnh (favorites, run script, ô input chung) đều áp dụng cho terminal active. Click vào terminal → tự thành active + focus chuyển về ô nhập.
 - **Một ô nhập lệnh dùng chung** ở dưới đáy app (đa dòng). Tất cả terminal CHỈ hiển thị output, không có ô nhập riêng. Label `→ CMD #1` cho biết command sẽ đi tới terminal nào. Lịch sử lệnh dùng chung (`Ctrl+↑` / `Ctrl+↓`).
-- **Password mode**: tự detect prompt `password:` / `passphrase:` / `[sudo] password for…` / `Mật khẩu:` và chuyển ô nhập sang masked input. Submit → gửi và về normal. `Ctrl+Shift+P` toggle thủ công.
-- **Log gộp**: panel dưới hiển thị output gộp từ mọi phiên, có thể lưu ra `.txt`. Lọc theo phiên (dropdown) + tìm kiếm nội dung.
+- **Password mode**: tự detect prompt `password:` / `passphrase:` / `[sudo] password for…` / `Mật khẩu:` và chuyển ô nhập sang masked input.
+- **Log gộp**: panel dưới hiển thị output gộp từ mọi phiên, có thể lưu ra `.txt`. Lọc theo phiên + tìm kiếm nội dung.
 - **Mở maximized** mỗi lần khởi động.
 
 ## Cấu trúc thư mục
@@ -51,6 +53,7 @@ TerminalManager/
 ├── i18n.py              # bộ dịch UI (vi / en)
 ├── favorites.json       # tự sinh khi chạy lần đầu
 ├── settings.json        # tự sinh khi đóng app lần đầu
+├── TerminalManager.spec # PyInstaller build spec
 ├── requirements.txt
 ├── README.md            # English
 └── README.vi.md         # Tiếng Việt
@@ -62,10 +65,16 @@ Yêu cầu: **Python 3.9+** trên Windows 10/11, macOS 11+, hoặc Linux (bất 
 
 `requirements.txt` dùng PEP 508 markers nên `pip install -r requirements.txt` tự chọn đúng dependency cho platform (`pywinpty` cho Windows, `ptyprocess` cho macOS/Linux).
 
+### Clone repository
+
+```bash
+git clone https://github.com/huthido/TerminalManager.git
+cd TerminalManager
+```
+
 ### Windows
 
 ```bat
-cd D:\code\cowok\Apps\TerminalManager
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
@@ -75,7 +84,6 @@ python main.py
 ### macOS
 
 ```bash
-cd /path/to/TerminalManager
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -86,7 +94,6 @@ python main.py
 
 ```bash
 sudo apt-get install -y python3-pyqt5 python3-venv
-cd /path/to/TerminalManager
 python3 -m venv .venv --system-site-packages
 source .venv/bin/activate
 pip install ptyprocess darkdetect
@@ -116,16 +123,20 @@ python main.py
 | Double-click tab | Đổi tên tab |
 | Nút **×** trên status bar | Đóng terminal hiện tại |
 
-## Đóng gói thành file thực thi
+## Build file thực thi
 
-Dùng [PyInstaller](https://pyinstaller.org/):
+Dùng [PyInstaller](https://pyinstaller.org/) với file `TerminalManager.spec` có sẵn (đã đóng gói đầy đủ DLLs của `pywinpty` để ConPTY agent hoạt động):
 
 ```bash
 pip install pyinstaller
-pyinstaller --noconfirm --onefile --windowed --name TerminalManager main.py
+pyinstaller --noconfirm TerminalManager.spec
 ```
 
-Build trên platform target (`.exe` chỉ build được trên Windows, `.app` chỉ trên macOS, AppImage/binary chỉ trên Linux).
+Output: `dist/TerminalManager/TerminalManager.exe` (Windows) hoặc tương đương trên macOS/Linux — distribute **CẢ folder `TerminalManager/`** chứ không chỉ executable, vì DLLs cần nằm cạnh exe.
+
+> Build trên platform target: `.exe` chỉ build được trên Windows, `.app` chỉ trên macOS, AppImage/binary chỉ trên Linux.
+
+> **Vì sao không dùng `--onefile`?** `--onefile` extract DLLs ra temp directory, khiến ConPTY agent của `pywinpty` fail với `STATUS_CONTROL_C_EXIT (-1073741510)`. Spec đi kèm dùng `--onedir` để DLLs nằm cạnh exe. Nếu muốn distribute 1 file, dùng [Inno Setup](https://jrsoftware.org/isinfo.php) hoặc [NSIS](https://nsis.sourceforge.io/) để wrap folder thành installer sau khi build.
 
 ## Shells
 
@@ -162,3 +173,12 @@ Nút shell **disable** nếu app không tìm thấy binary tương ứng.
 - Đổi giao diện màu/nền: chỉnh `setStyleSheet(...)` trong `terminal_tab.py` (vùng output) và `main_window.py`.
 - Đổi font: `QFont("Consolas", 10)` trong các file UI.
 - Thêm CLI tool vào scanner: chỉnh `_TOOLS` trong `tool_scanner.py`.
+
+## Đóng góp
+
+Mọi issue và pull request được chào đón tại https://github.com/huthido/TerminalManager.
+
+Khi báo lỗi, vui lòng kèm:
+- OS + phiên bản Python
+- Output của `pip list | grep -i -E "pyqt|winpty|ptyprocess|darkdetect"`
+- Nội dung file `startup.log` (tự sinh cạnh `main.py` mỗi lần chạy)

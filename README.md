@@ -4,6 +4,8 @@
 
 A **cross-platform** (Windows / macOS / Linux) application for managing multiple shell sessions in a single window, written in **Python + PyQt5**.
 
+**Repository:** https://github.com/huthido/TerminalManager
+
 | Platform | Shells supported | TTY backend |
 |----------|------------------|-------------|
 | Windows  | CMD, PowerShell, WSL, Git Bash | `pywinpty` (ConPTY) |
@@ -28,11 +30,11 @@ A **cross-platform** (Windows / macOS / Linux) application for managing multiple
 - **Favorites sidebar**: save / edit / delete / run, with a **search box** and shell filter. **🔍 Scan** auto-detects installed CLI tools (git, python, docker, ...) and adds them as favorites in bulk.
 - **Click a favorite** → command loads into the input box for editing; **double-click** → run immediately.
 - **Run script** (`Ctrl+R`): pick a `.bat` / `.cmd` / `.ps1` file → auto-selects the right shell, asks whether to run in current tab or open a new one. For `.ps1`, automatically sets `Set-ExecutionPolicy -Scope Process Bypass`.
-- **Open folder** (`Ctrl+O`): pick a folder from the dialog → auto `cd` into the active terminal (builds the right command per shell: `cd /D` for cmd, `Set-Location` for PowerShell, `cd '/mnt/c/…'` for WSL, etc.).
+- **Open folder** (`Ctrl+O`): pick a folder from the dialog → auto `cd` into the active terminal (builds the right command per shell).
 - **Active terminal**: only one terminal is "active" at a time; all commands (favorites, run script, shared input) apply to the active one. Clicking on a terminal makes it active + moves focus back to the input box.
-- **One shared input box** at the bottom (multi-line). All terminals show OUTPUT ONLY, with no per-terminal input. The label `→ CMD #1` shows which terminal a command will be sent to. Shared history (`Ctrl+↑` / `Ctrl+↓`).
-- **Password mode**: auto-detects `password:` / `passphrase:` / `[sudo] password for…` / `Mật khẩu:` prompts and switches the input to masked mode. Submit → send + back to normal. `Ctrl+Shift+P` to toggle manually.
-- **Combined log**: bottom panel shows merged output from all sessions, can be saved to `.txt`. Filter by session (dropdown) + search content.
+- **One shared input box** at the bottom (multi-line). All terminals show OUTPUT ONLY. The label `→ CMD #1` shows which terminal a command will be sent to. Shared history (`Ctrl+↑` / `Ctrl+↓`).
+- **Password mode**: auto-detects `password:` / `passphrase:` / `[sudo] password for…` / `Mật khẩu:` prompts and switches the input to masked mode.
+- **Combined log**: bottom panel shows merged output from all sessions, can be saved to `.txt`. Filter by session + search content.
 - **Opens maximized** on every launch.
 
 ## Project structure
@@ -51,6 +53,7 @@ TerminalManager/
 ├── i18n.py              # UI translations (vi / en)
 ├── favorites.json       # auto-generated on first run
 ├── settings.json        # auto-generated on first close
+├── TerminalManager.spec # PyInstaller build spec
 ├── requirements.txt
 ├── README.md            # English
 └── README.vi.md         # Vietnamese
@@ -62,10 +65,16 @@ Requires: **Python 3.9+** on Windows 10/11, macOS 11+, or any Linux distro with 
 
 `requirements.txt` uses PEP 508 markers, so `pip install -r requirements.txt` automatically picks the right dependency per platform (`pywinpty` for Windows, `ptyprocess` for macOS/Linux).
 
+### Clone the repository
+
+```bash
+git clone https://github.com/huthido/TerminalManager.git
+cd TerminalManager
+```
+
 ### Windows
 
 ```bat
-cd path\to\TerminalManager
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
@@ -75,7 +84,6 @@ python main.py
 ### macOS
 
 ```bash
-cd /path/to/TerminalManager
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -86,7 +94,6 @@ python main.py
 
 ```bash
 sudo apt-get install -y python3-pyqt5 python3-venv
-cd /path/to/TerminalManager
 python3 -m venv .venv --system-site-packages
 source .venv/bin/activate
 pip install ptyprocess darkdetect
@@ -116,16 +123,20 @@ python main.py
 | Double-click tab | Rename tab |
 | **×** button on status bar | Close current terminal |
 
-## Packaging into an executable
+## Building a standalone executable
 
-Use [PyInstaller](https://pyinstaller.org/):
+Use [PyInstaller](https://pyinstaller.org/) with the included `TerminalManager.spec` (which bundles `pywinpty`'s DLLs properly so the ConPTY agent can find them):
 
 ```bash
 pip install pyinstaller
-pyinstaller --noconfirm --onefile --windowed --name TerminalManager main.py
+pyinstaller --noconfirm TerminalManager.spec
 ```
 
-Build on the target platform (`.exe` only builds on Windows, `.app` only on macOS, AppImage/binary only on Linux).
+Output: `dist/TerminalManager/TerminalManager.exe` (Windows) or equivalent on macOS/Linux — distribute the **entire `TerminalManager/` folder**, not just the executable, because the DLLs need to sit next to it.
+
+> Build on the target platform: `.exe` only builds on Windows, `.app` only on macOS, AppImage/binary only on Linux.
+
+> **Why not `--onefile`?** `--onefile` extracts DLLs to a temp directory, which causes `pywinpty`'s ConPTY agent to fail with `STATUS_CONTROL_C_EXIT (-1073741510)`. The included `.spec` uses `--onedir` mode to keep DLLs alongside the executable. If you want a single-file distribution, wrap the folder with [Inno Setup](https://jrsoftware.org/isinfo.php) or [NSIS](https://nsis.sourceforge.io/) afterwards.
 
 ## Shells
 
@@ -154,7 +165,7 @@ Shell buttons are **disabled** if the corresponding binary isn't found.
 
 - **Not a full terminal emulator**: no alternate screen buffer, no absolute cursor positioning (CSI H/f). Full-screen TUI apps like `vim`, `htop`, `nano` **still work** (keys are forwarded), but the layout may render incorrectly / flicker. REPLs / ssh / colored output work well.
 - Mouse reporting isn't supported.
-- Scrollback is capped at 5000 lines per tab to limit memory usage.
+- Scrollback is capped at 5000 lines per tab.
 
 ## Customization tips
 
@@ -162,3 +173,12 @@ Shell buttons are **disabled** if the corresponding binary isn't found.
 - Change colors/background: edit `setStyleSheet(...)` in `terminal_tab.py` (output area) and `main_window.py`.
 - Change font: `QFont("Consolas", 10)` in the UI files.
 - Add a CLI tool to the scanner: edit `_TOOLS` in `tool_scanner.py`.
+
+## Contributing
+
+Issues and pull requests welcome at https://github.com/huthido/TerminalManager.
+
+When reporting an issue, please include:
+- OS + Python version
+- Output of `pip list | grep -i -E "pyqt|winpty|ptyprocess|darkdetect"`
+- Contents of `startup.log` (generated next to `main.py` on each launch)
