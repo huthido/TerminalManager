@@ -99,3 +99,20 @@ coll = COLLECT(
     upx_exclude=[],
     name='TerminalManager',
 )
+
+# Trên macOS, đóng gói folder dist thành .app bundle để launcher Finder hiểu được.
+if sys.platform == "darwin":
+    app = BUNDLE(
+        coll,
+        name="TerminalManager.app",
+        icon=None,  # đường dẫn .icns nếu có icon
+        bundle_identifier="com.huthido.terminalmanager",
+        info_plist={
+            "CFBundleName": "Terminal Manager - Shell",
+            "CFBundleDisplayName": "Terminal Manager - Shell",
+            "CFBundleShortVersionString": "1.0.0",
+            "CFBundleVersion": "1.0.0",
+            "NSHighResolutionCapable": True,
+            "LSMinimumSystemVersion": "11.0",
+        },
+    )

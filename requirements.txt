@@ -7,3 +7,6 @@ ptyprocess>=0.7; sys_platform != "win32"
 
 # Theme detection cross-platform (Windows / macOS / Linux)
 darkdetect>=0.8
+
+# Full TUI emulator (vim, htop, nano, less, ...)
+pyte>=0.8

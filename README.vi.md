@@ -19,6 +19,9 @@
   - **TTY** (`pywinpty` trên Windows / `ptyprocess` trên Unix) — TTY thật, chạy được `ssh`, `vim`, REPL Python, `top`/`htop`…
   - **QProcess** (mặc định của Qt) — pipe stdin/stdout, đơn giản nhưng không có TTY (sẽ hiện cảnh báo *"Pseudo-terminal will not be allocated…"*).
   - Auto fallback nếu pywinpty/ptyprocess chưa cài.
+- **Hỗ trợ TUI đầy đủ** (qua [`pyte`](https://pyte.readthedocs.io/)): chạy được `vim`, `htop`, `nano`, `less`, `mc` và mọi TUI full-screen khác. Có alternate screen buffer, cursor positioning tuyệt đối, scrollback, raw key forwarding (arrow keys, F-keys, Ctrl+letters). Click vào terminal để focus → phím gõ đi thẳng tới TUI đang chạy.
+- **Gõ Unicode qua IME**: gõ tiếng Việt (Telex/VNI/Unikey), tiếng Trung (Pinyin), tiếng Nhật, tiếng Hàn, emoji… trực tiếp vào terminal — popup composition của OS hiện sát con trỏ.
+- **Tự ẩn ô nhập khi TUI mode**: nếu `pyte` đã cài, ô nhập dưới đáy app ẩn mặc định để khu vực terminal chiếm hết chiều cao. Toggle bằng **Ctrl+I** hoặc nút **⌨ Ô nhập** trên toolbar khi cần gõ lệnh line-based (multi-line paste, ...).
 - **Render màu ANSI** đầy đủ (16 màu + 256-color + truecolor 24-bit), bold/italic/underline, carriage-return overwrite, backspace, erase-line/erase-display.
 - **Bố cục linh hoạt** (toolbar **▦ Bố cục**): Tabs (1 terminal/lần) hoặc **Lưới R × C** (1×N một hàng, N×1 một cột, hoặc lưới chữ nhật/vuông tuỳ ý). Khi số cửa sổ vượt R×C → tự gom thành nhiều **Trang** trong QTabWidget bên trong. Kéo splitter giữa các cell để chỉnh tỉ lệ; menu **↔ Cân đều** để reset.
 - **Đổi tên tab**: double-click tiêu đề tab (hoặc chuột phải → Đổi tên) — process vẫn chạy.
@@ -32,9 +35,9 @@
 - **Chạy script** (`Ctrl+R`): chọn file `.bat` / `.cmd` / `.ps1` → tự chọn shell phù hợp, hỏi chạy ở tab hiện tại hay mở tab mới. Với `.ps1` tự bật `Set-ExecutionPolicy -Scope Process Bypass`.
 - **Mở thư mục** (`Ctrl+O`): chọn folder từ dialog → tự `cd` vào terminal active (build command đúng theo shell).
 - **Active terminal**: chỉ 1 terminal active tại 1 thời điểm; tất cả lệnh (favorites, run script, ô input chung) đều áp dụng cho terminal active. Click vào terminal → tự thành active + focus chuyển về ô nhập.
-- **Một ô nhập lệnh dùng chung** ở dưới đáy app (đa dòng). Tất cả terminal CHỈ hiển thị output, không có ô nhập riêng. Label `→ CMD #1` cho biết command sẽ đi tới terminal nào. Lịch sử lệnh dùng chung (`Ctrl+↑` / `Ctrl+↓`).
-- **Password mode**: tự detect prompt `password:` / `passphrase:` / `[sudo] password for…` / `Mật khẩu:` và chuyển ô nhập sang masked input.
-- **Log gộp**: panel dưới hiển thị output gộp từ mọi phiên, có thể lưu ra `.txt`. Lọc theo phiên + tìm kiếm nội dung.
+- **Một ô nhập lệnh dùng chung** ở dưới đáy app (đa dòng) — dùng cho shell line-based. Tất cả terminal CHỈ hiển thị output, không có ô nhập riêng. Label `→ CMD #1` cho biết command sẽ đi tới terminal nào. Lịch sử lệnh dùng chung (`Ctrl+↑` / `Ctrl+↓`). Tự ẩn khi TUI mode; toggle bằng **Ctrl+I**.
+- **Password mode**: tự detect prompt `password:` / `passphrase:` / `[sudo] password for…` / `Mật khẩu:` và chuyển ô nhập sang masked input. (Khi TUI mode, TTY shell tự xử lý echo-off khi đọc password nên app uỷ thác việc che ký tự cho shell.)
+- **Log gộp**: panel dưới hiển thị output gộp từ mọi phiên, có thể lưu ra `.txt`. Lọc theo phiên + tìm kiếm nội dung. **Gom theo dòng** nên gõ phím trong TUI không spam log — chỉ log line hoàn chỉnh.
 - **Mở maximized** mỗi lần khởi động.
 
 ## Cấu trúc thư mục
@@ -44,8 +47,9 @@ TerminalManager/
 ├── main.py              # entry point
 ├── main_window.py       # cửa sổ chính (toolbar, tabs, sidebar, log gộp, input)
 ├── terminal_tab.py      # widget terminal cho 1 phiên (output only)
+├── terminal_view.py     # widget TUI emulator đầy đủ (pyte-based)
 ├── pty_backend.py       # QProcess + TTY backends (cross-platform), shell resolver
-├── ansi_renderer.py     # ANSI parser + render màu vào QPlainTextEdit
+├── ansi_renderer.py     # ANSI renderer cũ (fallback khi pyte chưa cài)
 ├── favorites.py         # đọc/ghi favorites.json
 ├── tool_scanner.py      # registry + scan CLI tools
 ├── settings.py          # AppSettings (theme, language, session, backend, layout)
@@ -112,6 +116,7 @@ python main.py
 | `Ctrl+Shift+T` | Mở tab PowerShell/Zsh mới |
 | `Ctrl+R` | Chạy file script (.bat/.cmd/.ps1) |
 | `Ctrl+O` | Mở dialog chọn thư mục → `cd` vào terminal active |
+| `Ctrl+I` | Bật/tắt ô nhập chung (mặc định ẩn khi TUI mode) |
 | `Ctrl+W` | Đóng terminal hiện tại |
 | `Ctrl+L` | Xoá log gộp |
 | `Ctrl+,` | Mở Cài đặt (theme / ngôn ngữ / backend / layout) |
@@ -123,20 +128,79 @@ python main.py
 | Double-click tab | Đổi tên tab |
 | Nút **×** trên status bar | Đóng terminal hiện tại |
 
-## Build file thực thi
+## Build thành app thực thi
 
-Dùng [PyInstaller](https://pyinstaller.org/) với file `TerminalManager.spec` có sẵn (đã đóng gói đầy đủ DLLs của `pywinpty` để ConPTY agent hoạt động):
+Tất cả platform dùng chung 1 file spec [`TerminalManager.spec`](TerminalManager.spec) cho [PyInstaller](https://pyinstaller.org/):
+- Đóng gói đầy đủ DLLs của `pywinpty` (Windows) hoặc data của `ptyprocess` (Unix) để TTY backend hoạt động
+- Bao gồm `darkdetect`, `pyte`, `PyQt5` và data files
+- Dùng **onedir** mode (`--onedir`) — output là folder chứa executable + dependencies. **Không dùng onefile** vì pywinpty ConPTY agent sẽ fail (`STATUS_CONTROL_C_EXIT`) khi DLLs bị extract ra temp dir
+- Trên macOS, còn tạo thêm `.app` bundle
+
+**Phải build trên đúng platform target.** PyInstaller không cross-compile được: `.exe` chỉ build trên Windows, `.app` chỉ trên macOS, ELF binary chỉ trên Linux.
+
+### Chuẩn bị
 
 ```bash
 pip install pyinstaller
-pyinstaller --noconfirm TerminalManager.spec
 ```
 
-Output: `dist/TerminalManager/TerminalManager.exe` (Windows) hoặc tương đương trên macOS/Linux — distribute **CẢ folder `TerminalManager/`** chứ không chỉ executable, vì DLLs cần nằm cạnh exe.
+### Windows
 
-> Build trên platform target: `.exe` chỉ build được trên Windows, `.app` chỉ trên macOS, AppImage/binary chỉ trên Linux.
+```bat
+rem Trong venv đang activate, từ thư mục project:
+pyinstaller --noconfirm TerminalManager.spec
 
-> **Vì sao không dùng `--onefile`?** `--onefile` extract DLLs ra temp directory, khiến ConPTY agent của `pywinpty` fail với `STATUS_CONTROL_C_EXIT (-1073741510)`. Spec đi kèm dùng `--onedir` để DLLs nằm cạnh exe. Nếu muốn distribute 1 file, dùng [Inno Setup](https://jrsoftware.org/isinfo.php) hoặc [NSIS](https://nsis.sourceforge.io/) để wrap folder thành installer sau khi build.
+rem Output: dist\TerminalManager\TerminalManager.exe (+ các DLL cần thiết)
+rem Chạy:
+dist\TerminalManager\TerminalManager.exe
+```
+
+**Distribute** cả folder `dist\TerminalManager\` (zip lại). Nếu muốn 1 file installer:
+- [Inno Setup](https://jrsoftware.org/isinfo.php) — wizard cài đặt thân thiện, khuyến nghị
+- [NSIS](https://nsis.sourceforge.io/) — nhẹ, scriptable
+
+### macOS
+
+```bash
+# Trong venv, từ thư mục project:
+pyinstaller --noconfirm TerminalManager.spec
+
+# Output:
+#   dist/TerminalManager/                  ← folder onedir (binary + libs)
+#   dist/TerminalManager.app/              ← .app bundle macOS (khuyến nghị)
+# Chạy .app:
+open dist/TerminalManager.app
+```
+
+**Distribute** dạng `.app` bundle. Lựa chọn:
+- **Zip** `TerminalManager.app` rồi gửi
+- **DMG**: `hdiutil create -volname TerminalManager -srcfolder dist/TerminalManager.app TerminalManager.dmg`
+- Cho App Store / Gatekeeper: codesign + notarize (`codesign --sign "Developer ID Application: …" dist/TerminalManager.app`, rồi `xcrun notarytool submit`).
+
+Nếu có icon, sửa `icon="/path/to/icon.icns"` trong khối `BUNDLE(...)` của `TerminalManager.spec`.
+
+### Linux
+
+```bash
+# Trong venv, từ thư mục project:
+pyinstaller --noconfirm TerminalManager.spec
+
+# Output: dist/TerminalManager/   (folder chứa ELF binary `TerminalManager`)
+./dist/TerminalManager/TerminalManager
+```
+
+**Distribute** lựa chọn:
+- **Tar.gz**: `tar -czvf TerminalManager-linux.tar.gz -C dist TerminalManager`
+- **AppImage**: dùng [linuxdeployqt](https://github.com/probonopd/linuxdeployqt) hoặc [appimagetool](https://appimage.github.io/appimagetool/)
+- **`.deb`**: dùng `dh_make` + `dpkg-buildpackage`, hoặc [`fpm`](https://github.com/jordansissel/fpm): `fpm -s dir -t deb -n terminal-manager -v 1.0.0 dist/TerminalManager/=/opt/terminal-manager/`
+- **`.rpm`**: tương tự `fpm -t rpm …`
+- **Snap / Flatpak**: viết `snapcraft.yaml` / Flatpak manifest trỏ đến binary
+
+> **Note**: PyQt5 wheel có sẵn Qt plugins (`libqxcb`). Trên distro tối giản/headless, cần cài thêm system libs như `libxcb-cursor0`, `libxkbcommon-x11-0`, `libxcb-render-util0` — không sẽ bị `qt.qpa.plugin: Could not load the Qt platform plugin "xcb"`.
+
+### Vì sao dùng onedir thay vì onefile?
+
+`--onefile` extract mọi thứ ra temp directory lúc runtime, khiến ConPTY agent của `pywinpty` (`winpty-agent.exe`) fail với `STATUS_CONTROL_C_EXIT (-1073741510)` vì không tìm được các DLL anh em. Spec dùng `--onedir` để DLLs nằm cạnh executable. Muốn ship 1 file thì wrap onedir folder bằng installer (Inno Setup / DMG / AppImage).
 
 ## Shells
 
@@ -163,9 +227,9 @@ Nút shell **disable** nếu app không tìm thấy binary tương ứng.
 
 ## Giới hạn đã biết
 
-- **Không phải terminal emulator đầy đủ**: không có alternate screen buffer, không xử lý cursor positioning tuyệt đối (CSI H/f). TUI full-screen như `vim`, `htop`, `nano` **vẫn chạy được**, nhưng layout có thể vẽ ngược/nhấp nháy. REPL / ssh / output có màu thì OK.
-- Mouse reporting không hỗ trợ.
+- Mouse reporting trong TUI apps (vd click chuột trong `htop`) chưa forward — chỉ keyboard.
 - Scrollback giới hạn 5000 dòng/tab.
+- Nếu `pyte` chưa cài, app fallback về ANSI renderer cũ (scroll-mode, không TUI).
 
 ## Tuỳ biến nhanh
 

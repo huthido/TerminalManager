@@ -1,4 +1,4 @@
-"""Cửa sổ chính của Terminal Manager."""
+"""Cửa sổ chính của Terminal Manager - Shell."""
 
 from __future__ import annotations
 
@@ -8,15 +8,6 @@ import sys
 from datetime import datetime
 
 IS_WINDOWS = sys.platform == "win32"
-
-# DEBUG MARKER — nếu thấy dòng "MAINWINDOW_MARKER_v3" trong startup.log,
-# Python đang load đúng file. Nếu không → có vấn đề về cache/file path.
-try:
-    _here = os.path.dirname(os.path.abspath(__file__))
-    with open(os.path.join(_here, "startup.log"), "a", encoding="utf-8") as _f:
-        _f.write(f"[main_window.py MODULE IMPORT] MAINWINDOW_MARKER_v3 path={__file__}\n")
-except Exception:
-    pass
 
 from PyQt5.QtCore import Qt, QEvent, QTimer
 from PyQt5.QtGui import QFont, QIcon, QKeySequence, QTextCursor
@@ -58,6 +49,10 @@ from terminal_tab import (
     looks_like_password_prompt,
     TERMINAL_MIME,
 )
+try:
+    from terminal_view import TerminalView
+except ImportError:
+    TerminalView = None  # type: ignore
 from settings import AppSettings, TabState, Geometry
 from i18n import t, set_language, get_language
 import theme as app_theme
@@ -451,6 +446,9 @@ class MainWindow(QMainWindow):
         self._log_entries: list[tuple[str, str, str]] = []
         # bộ nhớ các label phiên đã từng xuất hiện để build dropdown lọc
         self._known_sources: list[str] = []
+        # Buffer per-label: gom các chunk output thành line hoàn chỉnh trước khi
+        # log. Tránh log từng ký tự khi TUI mode echo từng phím gõ.
+        self._log_buffers: dict[str, str] = {}
 
         # Lịch sử lệnh dùng chung cho ô input
         self._history: list[str] = []
@@ -458,50 +456,29 @@ class MainWindow(QMainWindow):
         # Trạng thái password mode của ô input chung
         self._password_mode: bool = False
 
-        # Logging local — không phụ thuộc import main (tránh circular / silent fail)
-        def _log(msg):
-            try:
-                here = os.path.dirname(os.path.abspath(__file__))
-                with open(os.path.join(here, "startup.log"), "a", encoding="utf-8") as f:
-                    f.write(f"[INIT] {msg}\n")
-            except Exception:
-                pass
-
-        _log("MainWindow.__init__ ENTER")
-        _log("Before _build_ui")
         self._build_ui()
-        _log("After _build_ui; Before _build_toolbar")
         self._build_toolbar()
-        _log("After _build_toolbar; Before _build_shortcuts")
         self._build_shortcuts()
-        _log("After _build_shortcuts; connecting focusChanged")
 
+        # Theo dõi focus toàn app để cập nhật active terminal
         app = QApplication.instance()
         if app is not None:
             app.focusChanged.connect(self._on_focus_changed)
-        _log("focusChanged connected")
 
+        # Mở tab khi khởi động: ưu tiên khôi phục session nếu có
         saved_layout = self._layout_mode
         self._layout_mode = "tabs"
-        _log(f"Opening initial tabs (restore={self.settings.restore_session}, "
-             f"saved={len(self.settings.last_tabs)})")
         if self.settings.restore_session and self.settings.last_tabs:
             for ts in self.settings.last_tabs:
-                _log(f"  restoring tab: shell={ts.shell}, title={ts.title}")
                 self._restore_tab(ts)
         else:
             # Default shell theo platform
-            _log("  add default shell tab BEFORE")
             if IS_WINDOWS:
                 self.add_cmd_tab()
             else:
                 self.add_bash_tab()
-            _log("  add default shell tab AFTER")
         if saved_layout != "tabs":
-            _log(f"Switching to saved layout {saved_layout} BEFORE")
             self._set_layout(saved_layout)
-            _log(f"Switching to saved layout {saved_layout} AFTER")
-        _log("MainWindow.__init__ EXIT")
 
     # ---------- UI ----------
     def _build_ui(self) -> None:
@@ -932,6 +909,16 @@ class MainWindow(QMainWindow):
         a_open_folder.triggered.connect(self._open_folder_in_shell)
         tb.addAction(a_open_folder)
 
+        a_toggle_input = QAction(t("menu_toggle_input"), self)
+        a_toggle_input.setShortcut("Ctrl+I")
+        a_toggle_input.setToolTip(t("menu_toggle_input_tip"))
+        a_toggle_input.setCheckable(True)
+        a_toggle_input.triggered.connect(self._toggle_input_panel)
+        # Mặc định: ẩn nếu TUI mode (pyte có sẵn), hiện nếu fallback
+        a_toggle_input.setChecked(TerminalView is None)
+        tb.addAction(a_toggle_input)
+        self._action_toggle_input = a_toggle_input
+
         tb.addSeparator()
 
         # Layout menu
@@ -984,6 +971,28 @@ class MainWindow(QMainWindow):
             QKeySequence("Ctrl+Shift+P"), self,
             activated=lambda: self._set_password_mode(not self._password_mode),
         )
+        # Áp dụng trạng thái mặc định cho input panel (ẩn nếu TUI mode)
+        self._apply_input_panel_visibility(visible=TerminalView is None)
+
+    def _toggle_input_panel(self, checked: bool) -> None:
+        """Bật/tắt hiển thị ô nhập chung. Phím tắt Ctrl+I."""
+        self._apply_input_panel_visibility(visible=checked)
+
+    def _apply_input_panel_visibility(self, visible: bool) -> None:
+        if not hasattr(self, "_input_panel"):
+            return
+        self._input_panel.setVisible(visible)
+        if hasattr(self, "_action_toggle_input"):
+            if self._action_toggle_input.isChecked() != visible:
+                self._action_toggle_input.blockSignals(True)
+                self._action_toggle_input.setChecked(visible)
+                self._action_toggle_input.blockSignals(False)
+        # Khi ẩn: clear text, exit password mode để không kẹt
+        if not visible:
+            if hasattr(self, "input"):
+                self.input.clear()
+            if self._password_mode:
+                self._set_password_mode(False)
 
     # ---------- Tab management ----------
     def add_cmd_tab(self) -> TerminalTab:
@@ -1143,6 +1152,11 @@ class MainWindow(QMainWindow):
             term.stop_process()
         except Exception:
             pass
+        # Flush phần buffer log còn lại của terminal này
+        leftover = self._log_buffers.pop(term.label, "").rstrip("\r")
+        if leftover:
+            ts = datetime.now().strftime("%H:%M:%S")
+            self._append_log_entry(ts, term.label, leftover)
         self._log_system(f"[-] Đóng tab {term.label}")
         self._terminals.remove(term)
         # nếu vừa đóng đúng terminal active → chọn cái đầu còn lại
@@ -1225,20 +1239,38 @@ class MainWindow(QMainWindow):
 
     def _on_focus_changed(self, _old, new) -> None:
         """
-        Khi focus đổi → tìm TerminalTab gần nhất chứa widget mới focus và đặt active.
-        Sau khi active, tự chuyển focus về ô nhập chung để user gõ lệnh ngay được.
-        Mouse selection trong output vẫn hoạt động bình thường (mouse events đi
-        theo cursor, không phụ thuộc focus).
+        Khi focus đổi → cập nhật active terminal.
+        - Click QPushButton trong status bar: chỉ set active, không steal focus.
+        - Click TerminalView (TUI mode): chỉ set active, KHÔNG steal focus → user
+          có thể gõ phím trực tiếp vào vim/htop/nano qua TerminalView.
+        - Click output (fallback mode): set active + steal focus về ô nhập chung.
         """
-        # Bỏ qua khi đang focus chính ô input/password (tránh loop hoặc steal-back)
         if new is getattr(self, "input", None) or new is getattr(self, "input_password", None):
             return
+        # Click vào button → giữ focus button để click cycle hoàn thành
+        if isinstance(new, QPushButton):
+            w = new
+            while w is not None:
+                if isinstance(w, TerminalTab) and w in self._terminals:
+                    self._set_active_terminal(w)
+                    return
+                w = w.parentWidget()
+            return
+        # Click vào TerminalView (TUI) → giữ focus để raw keys đi xuống PTY
+        if TerminalView is not None and isinstance(new, TerminalView):
+            w = new
+            while w is not None:
+                if isinstance(w, TerminalTab) and w in self._terminals:
+                    self._set_active_terminal(w)
+                    return
+                w = w.parentWidget()
+            return
+        # Trường hợp khác: set active + steal focus về input chung
         w = new
         while w is not None:
             if isinstance(w, TerminalTab):
                 if w in self._terminals:
                     self._set_active_terminal(w)
-                    # Chuyển focus về ô nhập (password hoặc command tuỳ mode)
                     target = self.input_password if self._password_mode else self.input
                     QTimer.singleShot(0, target.setFocus)
                 return
@@ -1246,16 +1278,26 @@ class MainWindow(QMainWindow):
 
     # ---------- Combined log ----------
     def _on_terminal_output(self, label: str, text: str) -> None:
-        # gắn prefix tên phiên cho từng dòng để dễ phân biệt + lọc về sau
+        # Gom chunk vào buffer per-label. Chỉ log những line ĐÃ KẾT THÚC (có
+        # \n). Phần dở dang (cuối buffer) giữ lại đến chunk sau. Cách này tránh
+        # log spam khi TUI mode echo từng ký tự gõ phím.
         ts = datetime.now().strftime("%H:%M:%S")
-        for line in text.splitlines(keepends=False):
-            if not line:
-                continue
-            self._append_log_entry(ts, label, line)
+        buf = self._log_buffers.get(label, "") + text
+        parts = buf.split("\n")
+        # parts[-1] là phần dở dang (sau \n cuối cùng) — giữ lại
+        self._log_buffers[label] = parts[-1]
+        for line in parts[:-1]:
+            line = line.rstrip("\r")
+            if line:
+                self._append_log_entry(ts, label, line)
 
-        # Password detection — chỉ apply nếu output đến từ active terminal
+        # Password detection — apply nếu output đến từ active terminal.
+        # Bỏ qua khi input panel đang ẩn (TUI mode) vì TTY shell tự xử lý
+        # echo off khi đọc password rồi.
+        input_visible = hasattr(self, "_input_panel") and self._input_panel.isVisible()
         if (
-            self._active_terminal is not None
+            input_visible
+            and self._active_terminal is not None
             and label == self._active_terminal.label
             and not self._password_mode
             and self._active_terminal.is_at_password_prompt()
@@ -1551,18 +1593,23 @@ class MainWindow(QMainWindow):
         return self._visible_to_real_index(self.list_fav.currentRow())
 
     def _on_favorite_item_selected(self, current, _previous) -> None:
-        """Khi user click chọn 1 lệnh yêu thích → load command vào ô nhập."""
+        """Khi user click chọn 1 lệnh yêu thích → load command vào ô nhập.
+
+        Nếu input panel đang ẩn (TUI mode), không load (user sẽ dùng
+        double-click để chạy lệnh trực tiếp).
+        """
         if current is None or not hasattr(self, "input"):
+            return
+        # Bỏ qua nếu ô nhập đang ẩn — load sẽ không thấy
+        if hasattr(self, "_input_panel") and not self._input_panel.isVisible():
             return
         idx = self._visible_to_real_index(self.list_fav.row(current))
         if not (0 <= idx < len(self.favorites.items)):
             return
-        # Không load nếu đang ở password mode
         if self._password_mode:
             return
         fav = self.favorites.items[idx]
         self.input.setPlainText(fav.command)
-        # Đưa con trỏ về cuối + focus để user gõ thêm/sửa được ngay
         cursor = self.input.textCursor()
         cursor.movePosition(QTextCursor.End)
         self.input.setTextCursor(cursor)

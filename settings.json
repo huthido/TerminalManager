@@ -3,7 +3,7 @@
   "language": "en",
   "restore_session": true,
   "backend": "auto",
-  "layout_mode": "tabs",
+  "layout_mode": "grid:2x2",
   "geometry": {
     "w": 1920,
     "h": 1129
@@ -11,19 +11,15 @@
   "last_tabs": [
     {
       "shell": "cmd",
+      "title": "CMD #4"
+    },
+    {
+      "shell": "cmd",
       "title": "CMD #5"
     },
     {
       "shell": "cmd",
-      "title": "CMD #2"
-    },
-    {
-      "shell": "powershell",
-      "title": "PS #1"
-    },
-    {
-      "shell": "wsl",
-      "title": "WSL #1"
+      "title": "CMD #6"
     }
   ]
 }

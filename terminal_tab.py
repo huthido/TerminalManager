@@ -40,7 +40,7 @@ TERMINAL_MIME = "application/x-tmgr-terminal"
 
 from i18n import t
 from pty_backend import PtyBackendBase, create_backend, strip_ansi
-from ansi_renderer import AnsiRenderer
+from terminal_view import TerminalView, PYTE_AVAILABLE
 
 
 # ============================================================
@@ -265,25 +265,42 @@ class TerminalTab(QWidget):
         self.status_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         top.addWidget(self.status_label, 1)
 
+        # Dùng lambda để chắc chắn drop arg `bool checked` của clicked signal
+        # — tránh issue auto-trim arg ở một số build PyQt5/Python 3.13.
+        # Tô màu nền + viền để debug visibility — bạn sẽ thấy các nút rõ ràng
+        btn_style = (
+            "QPushButton { background: #444; color: #fff; "
+            "border: 1px solid #777; padding: 3px; }"
+            "QPushButton:hover { background: #555; }"
+            "QPushButton:pressed { background: #666; }"
+        )
+
         self.btn_clear = QPushButton("Clear")
         self.btn_clear.setFixedWidth(70)
-        self.btn_clear.clicked.connect(self.clear_output)
+        self.btn_clear.setStyleSheet(btn_style)
+        self.btn_clear.setToolTip("Clear terminal output")
+        self.btn_clear.clicked.connect(lambda _checked=False: self.clear_output())
         top.addWidget(self.btn_clear)
 
         self.btn_stop = QPushButton("Stop")
         self.btn_stop.setFixedWidth(70)
-        self.btn_stop.clicked.connect(self.stop_process)
+        self.btn_stop.setStyleSheet(btn_style)
+        self.btn_stop.setToolTip("Kill the shell process")
+        self.btn_stop.clicked.connect(lambda _checked=False: self.stop_process())
         top.addWidget(self.btn_stop)
 
         self.btn_restart = QPushButton("Restart")
         self.btn_restart.setFixedWidth(80)
-        self.btn_restart.clicked.connect(self.restart_process)
+        self.btn_restart.setStyleSheet(btn_style)
+        self.btn_restart.setToolTip("Restart the shell process")
+        self.btn_restart.clicked.connect(lambda _checked=False: self.restart_process())
         top.addWidget(self.btn_restart)
 
         self.btn_close = QPushButton("×")
         self.btn_close.setFixedWidth(32)
+        self.btn_close.setStyleSheet(btn_style)
         self.btn_close.setToolTip("Close this terminal")
-        self.btn_close.clicked.connect(self.close_requested)
+        self.btn_close.clicked.connect(lambda _checked=False: self.close_requested.emit())
         top.addWidget(self.btn_close)
 
         layout.addLayout(top)
@@ -291,21 +308,33 @@ class TerminalTab(QWidget):
         # Vùng output — chiếm hết phần còn lại
         mono = QFont("Consolas", 10)
         mono.setStyleHint(QFont.Monospace)
-        self.output = QPlainTextEdit()
-        self.output.setReadOnly(True)
-        self.output.setFont(mono)
-        self.output.setStyleSheet(
-            "background-color: #1e1e1e; color: #d4d4d4; border: 1px solid #333;"
-        )
-        self.output.setMaximumBlockCount(5000)
+        # TerminalView (pyte-based full TUI emulator) thay cho QPlainTextEdit cũ.
+        # Nếu pyte chưa cài → fallback về QPlainTextEdit (giới hạn ở scroll mode).
+        if PYTE_AVAILABLE:
+            self.output = TerminalView()
+            self.output.setFont(mono)
+            # User gõ phím khi focus TerminalView → forward xuống PTY
+            self.output.key_pressed.connect(self._on_view_key_pressed)
+            # Widget resize → cập nhật PTY size (debounced)
+            self.output.resized.connect(self._on_view_resized)
+            self._uses_tui = True
+        else:
+            # Fallback: QPlainTextEdit + AnsiRenderer cũ
+            from ansi_renderer import AnsiRenderer
+            self.output = QPlainTextEdit()
+            self.output.setReadOnly(True)
+            self.output.setFont(mono)
+            self.output.setStyleSheet(
+                "background-color: #1e1e1e; color: #d4d4d4; border: 1px solid #333;"
+            )
+            self.output.setMaximumBlockCount(5000)
+            self._renderer = AnsiRenderer(
+                self.output,
+                default_fg=QColor("#d4d4d4"),
+                default_bg=None,
+            )
+            self._uses_tui = False
         layout.addWidget(self.output, 1)
-
-        # Renderer ANSI
-        self._renderer = AnsiRenderer(
-            self.output,
-            default_fg=QColor("#d4d4d4"),
-            default_bg=None,
-        )
 
     # ---------- Process / backend ----------
     def _start_process(self) -> None:
@@ -357,13 +386,32 @@ class TerminalTab(QWidget):
             return 120, 30
 
     def _on_output(self, text: str) -> None:
-        # Render vào widget với màu + cursor (xử lý CR/BS/CSI)
-        self._renderer.feed(text)
-        # Combined log + password detection ở MainWindow nhận bản plain
+        # Render: TerminalView (pyte) hoặc AnsiRenderer (fallback)
+        if self._uses_tui:
+            self.output.feed(text)
+        else:
+            self._renderer.feed(text)
+        # Combined log + password detection nhận bản plain
         clean = strip_ansi(text).replace("\r\n", "\n").replace("\r", "\n")
-        # buffer gần nhất cho password detection (MainWindow đọc qua is_at_password_prompt)
         self._recent_output = (self._recent_output + clean)[-512:]
         self.output_received.emit(self.label, clean)
+
+    def _on_view_key_pressed(self, data: bytes) -> None:
+        """User gõ phím khi focus TerminalView → forward bytes xuống PTY."""
+        if self.backend and self.backend.is_running():
+            try:
+                # pty_backend.write expect str → decode bytes
+                self.backend.write(data.decode("utf-8", errors="replace"))
+            except Exception:
+                pass
+
+    def _on_view_resized(self, cols: int, rows: int) -> None:
+        """TerminalView grid resize → cập nhật PTY size."""
+        if self.backend and self.backend.supports_tty:
+            try:
+                self.backend.resize(cols, rows)
+            except Exception:
+                pass
 
     def _on_finished(self, exit_code: int) -> None:
         self._append_output(
@@ -418,11 +466,15 @@ class TerminalTab(QWidget):
 
     def restart_process(self) -> None:
         self.stop_process()
-        self.output.clear()
+        if self._uses_tui:
+            self.output.clear()
+        else:
+            self.output.clear()
         self._recent_output = ""
         self._start_process()
 
     def clear_output(self) -> None:
+        # Cả TerminalView và QPlainTextEdit đều có method clear()
         self.output.clear()
         self._recent_output = ""
 
@@ -436,9 +488,12 @@ class TerminalTab(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        # debounce: chỉ apply resize sau khi user dừng kéo, không gửi liên tục
+        # TUI mode: TerminalView tự handle resize + emit signal.
+        # Fallback mode: debounce + estimate từ output widget.
+        if self._uses_tui:
+            return
         if self.backend and self.backend.supports_tty:
-            self._resize_timer.start()  # restart timer mỗi lần resize
+            self._resize_timer.start()
 
     def _apply_resize(self) -> None:
         if self.backend and self.backend.supports_tty:
@@ -449,6 +504,22 @@ class TerminalTab(QWidget):
     def _append_output(
         self, text: str, *, echo: bool = False, system: bool = False, error: bool = False
     ) -> None:
+        """
+        Hiển thị 1 message do APP (không phải shell) tạo ra.
+
+        TUI mode: KHÔNG vẽ vào TerminalView — vì pyte coi text là dữ liệu của
+        shell, sẽ làm cursor lệch khỏi vị trí thực của shell. Thay vào đó, gửi
+        message vào combined log để user vẫn xem được. Status bar của terminal
+        cũng đã hiển thị tên shell + PID + backend nên không thiếu info.
+
+        Fallback (QPlainTextEdit): vẽ trực tiếp như cũ.
+        """
+        if self._uses_tui:
+            clean = text.rstrip("\n").rstrip("\r")
+            if clean:
+                self.output_received.emit(self.label, clean)
+            return
+        # Fallback path: QPlainTextEdit + cursor
         cursor = self.output.textCursor()
         cursor.movePosition(QTextCursor.End)
         fmt = cursor.charFormat()
