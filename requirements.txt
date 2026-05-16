@@ -1,0 +1,9 @@
+# GUI framework — cross-platform
+PyQt5>=5.15
+
+# TTY backend per-platform (PEP 508 markers)
+pywinpty>=2.0;   sys_platform == "win32"
+ptyprocess>=0.7; sys_platform != "win32"
+
+# Theme detection cross-platform (Windows / macOS / Linux)
+darkdetect>=0.8

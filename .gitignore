@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# PyInstaller build artifacts
+build/
+dist/
+*.manifest
+
+# Logs
+startup.log
+*.log
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local runtime/config (uncomment if these should stay local)
+# settings.json
+# favorites.json

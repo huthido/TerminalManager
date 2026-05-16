@@ -1,0 +1,212 @@
+[
+  {
+    "name": "Liệt kê file (CMD)",
+    "command": "dir",
+    "shell": "cmd"
+  },
+  {
+    "name": "Đường dẫn hiện tại (CMD)",
+    "command": "cd",
+    "shell": "cmd"
+  },
+  {
+    "name": "Liệt kê file (PS)",
+    "command": "Get-ChildItem",
+    "shell": "powershell"
+  },
+  {
+    "name": "Top 10 process theo CPU",
+    "command": "Get-Process | Sort-Object CPU -Descending | Select-Object -First 10",
+    "shell": "powershell"
+  },
+  {
+    "name": "Ping Google",
+    "command": "ping -n 4 google.com",
+    "shell": "any"
+  },
+  {
+    "name": "IP config",
+    "command": "ipconfig",
+    "shell": "cmd"
+  },
+  {
+    "name": "gcloud projects",
+    "command": "gcloud projects list",
+    "shell": "any"
+  },
+  {
+    "name": "Docker Compose ps",
+    "command": "docker-compose ps",
+    "shell": "any"
+  },
+  {
+    "name": "Docker ps",
+    "command": "docker ps",
+    "shell": "any"
+  },
+  {
+    "name": "kubectl get pods",
+    "command": "kubectl get pods",
+    "shell": "any"
+  },
+  {
+    "name": "SQLite version",
+    "command": "sqlite3 --version",
+    "shell": "any"
+  },
+  {
+    "name": "VS Code version",
+    "command": "code --version",
+    "shell": "any"
+  },
+  {
+    "name": ".NET info",
+    "command": "dotnet --info",
+    "shell": "any"
+  },
+  {
+    "name": "Go version",
+    "command": "go version",
+    "shell": "any"
+  },
+  {
+    "name": "Java version",
+    "command": "java -version",
+    "shell": "any"
+  },
+  {
+    "name": "Node version",
+    "command": "node --version",
+    "shell": "any"
+  },
+  {
+    "name": "Python (py launcher)",
+    "command": "py --version",
+    "shell": "any"
+  },
+  {
+    "name": "Python version",
+    "command": "python --version",
+    "shell": "any"
+  },
+  {
+    "name": "javac version",
+    "command": "javac -version",
+    "shell": "any"
+  },
+  {
+    "name": "ImageMagick convert ver",
+    "command": "convert --version",
+    "shell": "any"
+  },
+  {
+    "name": "tar version",
+    "command": "tar --version",
+    "shell": "any"
+  },
+  {
+    "name": "Active connections",
+    "command": "netstat -ano",
+    "shell": "any"
+  },
+  {
+    "name": "DNS lookup google",
+    "command": "nslookup google.com",
+    "shell": "any"
+  },
+  {
+    "name": "PuTTY plink version",
+    "command": "plink -V",
+    "shell": "any"
+  },
+  {
+    "name": "SCP help",
+    "command": "scp",
+    "shell": "any"
+  },
+  {
+    "name": "SFTP help",
+    "command": "sftp",
+    "shell": "any"
+  },
+  {
+    "name": "SSH version",
+    "command": "ssh -V",
+    "shell": "any"
+  },
+  {
+    "name": "Trace route google",
+    "command": "tracert google.com",
+    "shell": "cmd"
+  },
+  {
+    "name": "curl version",
+    "command": "curl --version",
+    "shell": "any"
+  },
+  {
+    "name": "wget version",
+    "command": "wget --version",
+    "shell": "any"
+  },
+  {
+    "name": "Winget list",
+    "command": "winget list",
+    "shell": "any"
+  },
+  {
+    "name": "Yarn version",
+    "command": "yarn --version",
+    "shell": "any"
+  },
+  {
+    "name": "npm global packages",
+    "command": "npm list -g --depth=0",
+    "shell": "any"
+  },
+  {
+    "name": "pip list",
+    "command": "pip list",
+    "shell": "any"
+  },
+  {
+    "name": "pnpm version",
+    "command": "pnpm --version",
+    "shell": "any"
+  },
+  {
+    "name": "uv version",
+    "command": "uv --version",
+    "shell": "any"
+  },
+  {
+    "name": "Git log",
+    "command": "git log --oneline -20",
+    "shell": "any"
+  },
+  {
+    "name": "Git status",
+    "command": "git status",
+    "shell": "any"
+  },
+  {
+    "name": "Power config",
+    "command": "powercfg /list",
+    "shell": "cmd"
+  },
+  {
+    "name": "SFC scan",
+    "command": "sfc /scannow",
+    "shell": "cmd"
+  },
+  {
+    "name": "System info",
+    "command": "systeminfo",
+    "shell": "cmd"
+  },
+  {
+    "name": "Tasklist",
+    "command": "tasklist",
+    "shell": "cmd"
+  }
+]
