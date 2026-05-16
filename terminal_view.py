@@ -15,9 +15,9 @@ Phát signal:
 
 from __future__ import annotations
 
-from PyQt5.QtCore import Qt, pyqtSignal, QRect, QSize, QTimer, QEvent
-from PyQt5.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
-from PyQt5.QtWidgets import QAbstractScrollArea, QWidget
+from PyQt5.QtCore import Qt, pyqtSignal, QRect, QSize, QTimer, QEvent, QPoint
+from PyQt5.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen, QGuiApplication
+from PyQt5.QtWidgets import QAbstractScrollArea, QWidget, QMenu, QAction
 
 try:
     import pyte
@@ -187,6 +187,18 @@ class TerminalView(QAbstractScrollArea):
         # Scroll position (0 = ở cuối/live; >0 = đã scroll lên scrollback)
         self.verticalScrollBar().valueChanged.connect(lambda _: self.viewport().update())
 
+        # Selection: cell coordinates (col, visible_row) trong vùng paint
+        self._sel_start: tuple[int, int] | None = None
+        self._sel_end: tuple[int, int] | None = None
+        self._sel_dragging = False
+
+        # Context menu (right-click)
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._show_context_menu)
+
+        # Mouse tracking để cursor đổi shape khi hover selection
+        self.viewport().setCursor(Qt.IBeamCursor)
+
     # ---------- API ----------
     def feed(self, data) -> None:
         """Feed bytes/str từ PTY vào emulator."""
@@ -295,14 +307,32 @@ class TerminalView(QAbstractScrollArea):
             bar.setValue(0)
 
     def _emit_key(self, data: bytes) -> None:
-        """Helper: scroll về live trước khi forward phím xuống PTY."""
+        """Helper: scroll về live + clear selection trước khi forward phím xuống PTY."""
         self._scroll_to_live()
+        if self._sel_start is not None or self._sel_end is not None:
+            self.clear_selection()
         self.key_pressed.emit(data)
 
     def keyPressEvent(self, e):
         key = e.key()
         mods = e.modifiers()
         text = e.text()
+
+        # Ctrl+Shift+C / Ctrl+Shift+V — clipboard. Xử lý TRƯỚC Ctrl+letter
+        # (vì Ctrl+C nguyên thuần = SIGINT, không được nuốt cho clipboard).
+        if (mods & Qt.ControlModifier) and (mods & Qt.ShiftModifier) and not (mods & Qt.AltModifier):
+            if key == Qt.Key_C:
+                self.copy_selection()
+                e.accept()
+                return
+            if key == Qt.Key_V:
+                self.paste_clipboard()
+                e.accept()
+                return
+            if key == Qt.Key_A:
+                self.select_all()
+                e.accept()
+                return
 
         # Zoom shortcuts (xử lý local, KHÔNG forward xuống PTY):
         # Ctrl + + / Ctrl + = : zoom in
@@ -448,6 +478,26 @@ class TerminalView(QAbstractScrollArea):
                     run_start * cw, y_px + baseline_offset, "".join(run_chars)
                 )
 
+        # Selection highlight — vẽ overlay translucent xanh lên các cell selected
+        sel = self._sel_normalized()
+        if sel is not None:
+            (sc, sr), (ec, er) = sel
+            sel_color = QColor(80, 130, 200, 110)  # xanh nhạt, alpha ~43%
+            for row in range(sr, er + 1):
+                if row < 0 or row >= self._rows:
+                    continue
+                start_col = sc if row == sr else 0
+                end_col = ec if row == er else self._cols - 1
+                if end_col < start_col:
+                    continue
+                rect = QRect(
+                    start_col * cw,
+                    row * ch,
+                    (end_col - start_col + 1) * cw,
+                    ch,
+                )
+                painter.fillRect(rect, sel_color)
+
         # Cursor (chỉ vẽ nếu KHÔNG đang scroll lên history)
         if scroll_pos == 0 and not self.screen.cursor.hidden and self._cursor_visible:
             cx_px = self.screen.cursor.x * cw
@@ -490,13 +540,66 @@ class TerminalView(QAbstractScrollArea):
             return self._font
         return super().inputMethodQuery(query)
 
-    # ---------- mouse — focus on click ----------
+    # ---------- mouse — focus + selection ----------
     def mousePressEvent(self, e):
         self.setFocus(Qt.MouseFocusReason)
+        if e.button() == Qt.LeftButton:
+            # Bắt đầu selection
+            cell = self._pos_to_cell(e.pos())
+            self._sel_start = cell
+            self._sel_end = cell
+            self._sel_dragging = True
+            self.viewport().update()
         super().mousePressEvent(e)
 
+    def mouseMoveEvent(self, e):
+        if self._sel_dragging and (e.buttons() & Qt.LeftButton):
+            self._sel_end = self._pos_to_cell(e.pos())
+            self.viewport().update()
+            return
+        super().mouseMoveEvent(e)
+
+    def mouseReleaseEvent(self, e):
+        if e.button() == Qt.LeftButton and self._sel_dragging:
+            self._sel_end = self._pos_to_cell(e.pos())
+            self._sel_dragging = False
+            # Nếu start == end → coi như click đơn thuần, clear selection
+            if self._sel_start == self._sel_end:
+                self._sel_start = None
+                self._sel_end = None
+            self.viewport().update()
+            return
+        super().mouseReleaseEvent(e)
+
+    def mouseDoubleClickEvent(self, e):
+        """Double-click chọn 1 từ; triple-click chọn cả dòng (chưa làm)."""
+        if e.button() == Qt.LeftButton:
+            col, row = self._pos_to_cell(e.pos())
+            line = self._line_at_visible_row(row)
+            if line:
+                # Tìm biên từ trái + phải
+                left = col
+                right = col
+                while left > 0 and self._is_word_char(line.get(left - 1)):
+                    left -= 1
+                while right < self._cols - 1 and self._is_word_char(line.get(right + 1)):
+                    right += 1
+                if self._is_word_char(line.get(col)):
+                    self._sel_start = (left, row)
+                    self._sel_end = (right, row)
+                    self.viewport().update()
+                    return
+        super().mouseDoubleClickEvent(e)
+
+    @staticmethod
+    def _is_word_char(cell) -> bool:
+        if cell is None or not cell.data:
+            return False
+        ch = cell.data
+        return ch.isalnum() or ch in "_-./\\"
+
     def wheelEvent(self, e):
-        """Ctrl+wheel → zoom font (giữ Ctrl, lăn lên = to, lăn xuống = nhỏ)."""
+        """Ctrl+wheel → zoom font; wheel thường → scroll trong history."""
         if e.modifiers() & Qt.ControlModifier:
             delta = e.angleDelta().y()
             if delta > 0:
@@ -506,6 +609,113 @@ class TerminalView(QAbstractScrollArea):
             e.accept()
             return
         super().wheelEvent(e)
+
+    # ---------- Cell coordinate helpers ----------
+    def _pos_to_cell(self, pos: QPoint) -> tuple[int, int]:
+        x = max(0, pos.x()) // self._char_width
+        y = max(0, pos.y()) // self._char_height
+        return (
+            max(0, min(int(x), self._cols - 1)),
+            max(0, min(int(y), self._rows - 1)),
+        )
+
+    def _line_at_visible_row(self, row: int) -> dict | None:
+        """Lấy line content (dict {col: Char}) tại visible row, kể cả history."""
+        scroll_pos = self.verticalScrollBar().value()
+        history_top = list(self.screen.history.top)
+        if scroll_pos > 0:
+            history_lines = history_top[-scroll_pos:] if scroll_pos <= len(history_top) else history_top
+            if row < len(history_lines):
+                return history_lines[row]
+            screen_row = row - len(history_lines)
+        else:
+            screen_row = row
+        return self.screen.buffer.get(screen_row, {})
+
+    def _sel_normalized(self) -> tuple[tuple[int, int], tuple[int, int]] | None:
+        """Trả về (start, end) đã chuẩn hoá thứ tự (start ≤ end theo row, rồi col)."""
+        if self._sel_start is None or self._sel_end is None:
+            return None
+        a, b = self._sel_start, self._sel_end
+        if (a[1], a[0]) > (b[1], b[0]):
+            a, b = b, a
+        return a, b
+
+    def _is_cell_selected(self, col: int, row: int) -> bool:
+        sel = self._sel_normalized()
+        if sel is None:
+            return False
+        (sc, sr), (ec, er) = sel
+        if row < sr or row > er:
+            return False
+        if row == sr and row == er:
+            return sc <= col <= ec
+        if row == sr:
+            return col >= sc
+        if row == er:
+            return col <= ec
+        return sr < row < er
+
+    # ---------- Selection / clipboard ----------
+    def selected_text(self) -> str:
+        sel = self._sel_normalized()
+        if sel is None:
+            return ""
+        (sc, sr), (ec, er) = sel
+        lines: list[str] = []
+        for row in range(sr, er + 1):
+            line = self._line_at_visible_row(row) or {}
+            start_col = sc if row == sr else 0
+            end_col = ec if row == er else self._cols - 1
+            chars = []
+            for col in range(start_col, end_col + 1):
+                cell = line.get(col)
+                chars.append(cell.data if (cell and cell.data) else " ")
+            lines.append("".join(chars).rstrip())
+        return "\n".join(lines)
+
+    def copy_selection(self) -> None:
+        text = self.selected_text()
+        if text:
+            QGuiApplication.clipboard().setText(text)
+
+    def paste_clipboard(self) -> None:
+        text = QGuiApplication.clipboard().text()
+        if text:
+            # Gửi xuống PTY như user gõ tay (mỗi shell sẽ tự handle bracketed
+            # paste nếu bật)
+            self._scroll_to_live()
+            self.key_pressed.emit(text.encode("utf-8", errors="replace"))
+
+    def select_all(self) -> None:
+        if not self._rows or not self._cols:
+            return
+        self._sel_start = (0, 0)
+        self._sel_end = (self._cols - 1, self._rows - 1)
+        self.viewport().update()
+
+    def clear_selection(self) -> None:
+        if self._sel_start is None and self._sel_end is None:
+            return
+        self._sel_start = None
+        self._sel_end = None
+        self.viewport().update()
+
+    # ---------- Context menu ----------
+    def _show_context_menu(self, pos: QPoint) -> None:
+        menu = QMenu(self)
+        a_copy = menu.addAction("Copy\tCtrl+Shift+C")
+        a_copy.setEnabled(self._sel_normalized() is not None)
+        a_copy.triggered.connect(self.copy_selection)
+        a_paste = menu.addAction("Paste\tCtrl+Shift+V")
+        a_paste.triggered.connect(self.paste_clipboard)
+        menu.addSeparator()
+        a_select_all = menu.addAction("Select All")
+        a_select_all.triggered.connect(self.select_all)
+        a_clear_sel = menu.addAction("Clear Selection")
+        a_clear_sel.setEnabled(self._sel_normalized() is not None)
+        a_clear_sel.triggered.connect(self.clear_selection)
+        menu.exec_(self.viewport().mapToGlobal(pos))
 
 
 PYTE_AVAILABLE = pyte is not None
